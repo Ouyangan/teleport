@@ -35,3 +35,6 @@ socket/example/client
 socket/example/server
 _*
 .idea/*
+/vendor/github.com/
+/vendor/golang.org/
+/vendor/gopkg.in/

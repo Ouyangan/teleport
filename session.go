@@ -423,7 +423,6 @@ func (s *session) AsyncPull(
 			return true
 		})
 	}
-
 	cmd.mu.Lock()
 	defer cmd.mu.Unlock()
 
