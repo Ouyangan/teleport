@@ -8,14 +8,15 @@ import (
 )
 
 func main() {
-	svr := tp.NewPeer(tp.PeerConfig{
+	srv := tp.NewPeer(tp.PeerConfig{
+		PrintDetail:       true,
 		CountTime:         true,
 		ListenAddress:     ":9090",
 		DefaultSessionAge: time.Second * 7,
 		DefaultContextAge: time.Second * 2,
 	})
-	svr.RoutePull(new(test))
-	svr.Listen()
+	srv.RoutePull(new(test))
+	srv.ListenAndServe()
 }
 
 type test struct {
@@ -28,9 +29,9 @@ func (t *test) Ok(args *string) (string, *tp.Rerror) {
 
 func (t *test) Timeout(args *string) (string, *tp.Rerror) {
 	tCtx, _ := context.WithTimeout(t.Context(), time.Second)
+	time.Sleep(time.Second)
 	select {
 	case <-tCtx.Done():
-		return *args + " -> Not Timeout", nil
 		return "", tp.NewRerror(
 			tp.CodeHandleTimeout,
 			tp.CodeText(tp.CodeHandleTimeout),

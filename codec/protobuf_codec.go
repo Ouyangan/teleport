@@ -1,4 +1,4 @@
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 )
 
-//  protobuf codec id
+//  protobuf codec name and id
 const (
 	NAME_PROTOBUF = "protobuf"
 	ID_PROTOBUF   = 'p'
@@ -33,12 +33,12 @@ func init() {
 // ProtoCodec protobuf codec
 type ProtoCodec struct{}
 
-// Name returns codec string
+// Name returns codec name.
 func (ProtoCodec) Name() string {
 	return NAME_PROTOBUF
 }
 
-// Id returns codec id
+// Id returns codec id.
 func (ProtoCodec) Id() byte {
 	return ID_PROTOBUF
 }
@@ -57,7 +57,6 @@ func (ProtoCodec) Unmarshal(data []byte, v interface{}) error {
 var (
 	// EmptyStruct empty struct for protobuf
 	EmptyStruct = new(PbEmpty)
-	emptyStruct = struct{}{}
 )
 
 // ProtoMarshal returns the Protobuf encoding of v.
@@ -65,10 +64,11 @@ func ProtoMarshal(v interface{}) ([]byte, error) {
 	if p, ok := v.(proto.Message); ok {
 		return proto.Marshal(p)
 	}
-	if v == nil || v == emptyStruct {
+	switch v.(type) {
+	case nil, *struct{}, struct{}:
 		return proto.Marshal(EmptyStruct)
 	}
-	return nil, fmt.Errorf("%T does not implement proto.Message", v)
+	return nil, fmt.Errorf("protobuf codec: %T does not implement proto.Message", v)
 }
 
 // ProtoUnmarshal parses the Protobuf-encoded data and stores the result
@@ -77,8 +77,9 @@ func ProtoUnmarshal(data []byte, v interface{}) error {
 	if p, ok := v.(proto.Message); ok {
 		return proto.Unmarshal(data, p)
 	}
-	if v == nil || v == emptyStruct {
+	switch v.(type) {
+	case nil, *struct{}, struct{}:
 		return nil
 	}
-	return fmt.Errorf("%T does not implement proto.Message", v)
+	return fmt.Errorf("protobuf codec: %T does not implement proto.Message", v)
 }

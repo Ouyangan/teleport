@@ -80,8 +80,8 @@ go get -u -f github.com/henrylee2cn/teleport
 - 支持定制通信协议
 - 可设置底层套接字读写缓冲区的大小
 - 底层通信数据包包含`Header`和`Body`两部分
-- 支持单独定制`Header`和`Body`编码类型，例如`JSON` `Protobuf` `string`
 - 数据包`Header`包含与HTTP header相同格式的元信息
+- 支持单独定制`Body`编码类型，例如`JSON` `Protobuf` `string`
 - 支持推、拉、回复等通信方法
 - 支持插件机制，可以自定义认证、心跳、微服务注册中心、统计信息插件等
 - 无论服务器或客户端，均支持优雅重启、优雅关闭
@@ -110,12 +110,12 @@ import (
 )
 
 func main() {
-    svr := tp.NewPeer(tp.PeerConfig{
+    srv := tp.NewPeer(tp.PeerConfig{
         CountTime:     true,
         ListenAddress: ":9090",
     })
-    svr.RoutePull(new(math))
-    svr.Listen()
+    srv.RoutePull(new(math))
+    srv.ListenAndServe()
 }
 
 type math struct {
@@ -209,55 +209,39 @@ func (p *push) Status(args *string) *tp.Rerror {
 
 ```go
 // in .../teleport/socket package
-type (
-    type Packet struct {
-        // Has unexported fields.
-    }
-        Packet a socket data packet.
-    
-    func GetPacket(settings ...PacketSetting) *Packet
-    func NewPacket(settings ...PacketSetting) *Packet
-    func (p *Packet) Body() interface{}
-    func (p *Packet) BodyCodec() byte
-    func (p *Packet) Context() context.Context
-    func (p *Packet) MarshalBody() ([]byte, error)
-    func (p *Packet) Meta() *utils.Args
-    func (p *Packet) Ptype() byte
-    func (p *Packet) Reset(settings ...PacketSetting)
-    func (p *Packet) Seq() uint64
-    func (p *Packet) SetBody(body interface{})
-    func (p *Packet) SetBodyCodec(bodyCodec byte)
-    func (p *Packet) SetNewBody(newBodyFunc NewBodyFunc)
-    func (p *Packet) SetPtype(ptype byte)
-    func (p *Packet) SetSeq(seq uint64)
-    func (p *Packet) SetSize(size uint32) error
-    func (p *Packet) SetUri(uri string)
-    func (p *Packet) SetUriObject(uriObject *url.URL)
-    func (p *Packet) Size() uint32
-    func (p *Packet) String() string
-    func (p *Packet) UnmarshalBody(bodyBytes []byte) error
-    func (p *Packet) Uri() string
-    func (p *Packet) UriObject() *url.URL
-    func (p *Packet) XferPipe() *xfer.XferPipe
 
-    // NewBodyFunc creates a new body by header.
-    NewBodyFunc func(Header) interface{}
-)
+// Packet a socket data packet.
+type Packet struct {
+    // Has unexported fields.
+}
 
-// in .../teleport/xfer package
-type (
-    // XferPipe transfer filter pipe, handlers from outer-most to inner-most.
-    // Note: the length can not be bigger than 255!
-    XferPipe struct {
-        filters []XferFilter
-    }
-    // XferFilter handles byte stream of packet when transfer.
-    XferFilter interface {
-        Id() byte
-        OnPack([]byte) ([]byte, error)
-        OnUnpack([]byte) ([]byte, error)
-    }
-)
+func GetPacket(settings ...PacketSetting) *Packet
+func NewPacket(settings ...PacketSetting) *Packet
+func (p *Packet) Body() interface{}
+func (p *Packet) BodyCodec() byte
+func (p *Packet) Context() context.Context
+func (p *Packet) MarshalBody() ([]byte, error)
+func (p *Packet) Meta() *utils.Args
+func (p *Packet) Ptype() byte
+func (p *Packet) Reset(settings ...PacketSetting)
+func (p *Packet) Seq() string
+func (p *Packet) SetBody(body interface{})
+func (p *Packet) SetBodyCodec(bodyCodec byte)
+func (p *Packet) SetNewBody(newBodyFunc NewBodyFunc)
+func (p *Packet) SetPtype(ptype byte)
+func (p *Packet) SetSeq(seq string)
+func (p *Packet) SetSize(size uint32) error
+func (p *Packet) SetUri(uri string)
+func (p *Packet) SetUriObject(uriObject *url.URL)
+func (p *Packet) Size() uint32
+func (p *Packet) String() string
+func (p *Packet) UnmarshalBody(bodyBytes []byte) error
+func (p *Packet) Uri() string
+func (p *Packet) UriObject() *url.URL
+func (p *Packet) XferPipe() *xfer.XferPipe
+
+// NewBodyFunc creates a new body by header.
+type NewBodyFunc func(Header) interface{}
 ```
 
 ### 编解码器
@@ -281,21 +265,38 @@ type Codec interface {
 ### 过滤管道
 
 传输数据的过滤管道。
-
 ```go
-type (
-    // XferPipe transfer filter pipe, handlers from outer-most to inner-most.
-    // Note: the length can not be bigger than 255!
-    XferPipe struct {
-        filters []XferFilter
-    }
-    // XferFilter handles byte stream of packet when transfer.
-    XferFilter interface {
-        Id() byte
-        OnPack([]byte) ([]byte, error)
-        OnUnpack([]byte) ([]byte, error)
-    }
-)
+// XferFilter handles byte stream of packet when transfer.
+type XferFilter interface {
+    // Id returns transfer filter id.
+    Id() byte
+    // Name returns transfer filter name.
+    Name() string
+    // OnPack performs filtering on packing.
+    OnPack([]byte) ([]byte, error)
+    // OnUnpack performs filtering on unpacking.
+    OnUnpack([]byte) ([]byte, error)
+}
+// Get returns transfer filter by id.
+func Get(id byte) (XferFilter, error)
+// GetByName returns transfer filter by name.
+func GetByName(name string) (XferFilter, error)
+
+// XferPipe transfer filter pipe, handlers from outer-most to inner-most.
+// Note: the length can not be bigger than 255!
+type XferPipe struct {
+    // Has unexported fields.
+}
+func NewXferPipe() *XferPipe
+func (x *XferPipe) Append(filterId ...byte) error
+func (x *XferPipe) AppendFrom(src *XferPipe)
+func (x *XferPipe) Ids() []byte
+func (x *XferPipe) Len() int
+func (x *XferPipe) Names() []string
+func (x *XferPipe) OnPack(data []byte) ([]byte, error)
+func (x *XferPipe) OnUnpack(data []byte) ([]byte, error)
+func (x *XferPipe) Range(callback func(idx int, filter XferFilter) bool)
+func (x *XferPipe) Reset()
 ```
 
 ### 插件
@@ -352,6 +353,26 @@ type Peer interface {
     ...
 }
 ```
+
+默认的协议`FastProto`(Big Endian)：
+
+```sh
+{4 bytes packet length}
+{1 byte protocol version}
+{1 bytes transfer pipe length}
+{transfer pipe IDs}
+# The following is handled data by transfer pipe
+{4 bytes sequence length}
+{sequence}
+{1 byte packet type}
+{4 bytes URI length}
+{URI}
+{4 bytes metadata length}
+{metadata(urlencoded)}
+{1 byte body codec id}
+{body}
+```
+
 
 ## 用法
 
@@ -481,6 +502,17 @@ func XxxUnknownPush(ctx tp.UnknownPushCtx) *tp.Rerror {
 peer.SetUnknownPush(XxxUnknownPush)
 ```
 
+### 结构体（函数）名称映射到URI路径的规则：
+
+- `AaBb` -> `/aa_bb`
+- `Aa_Bb` -> `/aa/bb`
+- `aa_bb` -> `/aa/bb`
+- `Aa__Bb` -> `/aa_bb`
+- `aa__bb` -> `/aa_bb`
+- `ABC_XYZ` -> `/abc/xyz`
+- `ABcXYz` -> `/abc_xyz`
+- `ABC__XYZ` -> `/abc_xyz`
+
 ### 插件示例
 
 ```go
@@ -539,7 +571,7 @@ type PeerConfig struct {
     DefaultSessionAge  time.Duration `yaml:"default_session_age"  ini:"default_session_age"  comment:"Default session max age, if less than or equal to 0, no time limit; ns,µs,ms,s,m,h"`
     DefaultContextAge  time.Duration `yaml:"default_context_age"  ini:"default_context_age"  comment:"Default PULL or PUSH context max age, if less than or equal to 0, no time limit; ns,µs,ms,s,m,h"`
     SlowCometDuration  time.Duration `yaml:"slow_comet_duration"  ini:"slow_comet_duration"  comment:"Slow operation alarm threshold; ns,µs,ms,s ..."`
-    PrintBody          bool          `yaml:"print_body"           ini:"print_body"           comment:"Is print body or not"`
+    PrintDetail        bool          `yaml:"print_detail"         ini:"print_detail"         comment:"Is print body and metadata or not"`
     CountTime          bool          `yaml:"count_time"           ini:"count_time"           comment:"Is count cost time or not"`
 }
 ```
@@ -593,7 +625,8 @@ type PeerConfig struct {
 | ---------------------------------------- | ---------------------------------------- | ---------------------------- |
 | [json](https://github.com/henrylee2cn/teleport/blob/master/codec/json_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | JSON codec(teleport own)     |
 | [protobuf](https://github.com/henrylee2cn/teleport/blob/master/codec/protobuf_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Protobuf codec(teleport own) |
-| [string](https://github.com/henrylee2cn/teleport/blob/master/codec/string_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | String codec(teleport own)   |
+| [plain](https://github.com/henrylee2cn/teleport/blob/master/codec/plain_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Plain text codec(teleport own)   |
+| [form](https://github.com/henrylee2cn/teleport/blob/master/codec/form_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Form(url encode) codec(teleport own)   |
 
 ### 插件
 
@@ -603,6 +636,7 @@ type PeerConfig struct {
 | [binder](https://github.com/henrylee2cn/tp-ext/blob/master/plugin-binder) | `import binder "github.com/henrylee2cn/tp-ext/plugin-binder"` | Parameter Binding Verification for Struct Handler |
 | [heartbeat](https://github.com/henrylee2cn/tp-ext/blob/master/plugin-heartbeat) | `import heartbeat "github.com/henrylee2cn/tp-ext/plugin-heartbeat"` | A generic timing heartbeat plugin        |
 | [proxy](https://github.com/henrylee2cn/teleport/blob/master/plugin/proxy.go) | `import "github.com/henrylee2cn/teleport/plugin"` | A proxy plugin for handling unknown pulling or pushing |
+[secure](https://github.com/henrylee2cn/tp-ext/blob/master/plugin-secure)|`import secure "github.com/henrylee2cn/tp-ext/plugin-secure"`|Encrypting/decrypting the packet body
 
 ### 协议
 
@@ -625,6 +659,7 @@ type PeerConfig struct {
 | ---------------------------------------- | ---------------------------------------- | ---------------------------------------- |
 | [cliSession](https://github.com/henrylee2cn/tp-ext/blob/master/mod-cliSession) | `import cliSession "github.com/henrylee2cn/tp-ext/mod-cliSession"` | Client session with a high efficient and load balanced connection pool |
 | [websocket](https://github.com/henrylee2cn/tp-ext/blob/master/mod-websocket) | `import websocket "github.com/henrylee2cn/tp-ext/mod-websocket"` | Makes the Teleport framework compatible with websocket protocol as specified in RFC 6455 |
+| [html](https://github.com/xiaoenai/ants/blob/master/helper/mod-html) | `html "github.com/xiaoenai/ants/helper/mod-html"` | HTML render for http client |
 
 
 [扩展库](https://github.com/henrylee2cn/tp-ext)

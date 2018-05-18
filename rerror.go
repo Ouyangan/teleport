@@ -1,7 +1,6 @@
 package tp
 
 import (
-	"bytes"
 	"encoding/json"
 	"strconv"
 	"unsafe"
@@ -29,10 +28,8 @@ var (
 	_ json.Unmarshaler = new(Rerror)
 
 	reA = []byte(`{"code":`)
-	reB = []byte(`,"message":"`)
-	reC = []byte(`,"detail":"`)
-	reD = []byte(`"`)
-	reE = []byte(`\"`)
+	reB = []byte(`,"message":`)
+	reC = []byte(`,"detail":`)
 )
 
 // NewRerror creates a *Rerror.
@@ -56,20 +53,6 @@ func NewRerrorFromMeta(meta *utils.Args) *Rerror {
 	return r
 }
 
-// String prints error info.
-func (r *Rerror) String() string {
-	if r == nil {
-		return "<nil>"
-	}
-	b, _ := r.MarshalJSON()
-	return goutil.BytesToString(b)
-}
-
-// Copy returns the copy of Rerror
-func (r Rerror) Copy() *Rerror {
-	return &r
-}
-
 // SetToMeta sets self to 'X-Reply-Error' metadata.
 func (r *Rerror) SetToMeta(meta *utils.Args) {
 	b, _ := r.MarshalJSON()
@@ -77,6 +60,32 @@ func (r *Rerror) SetToMeta(meta *utils.Args) {
 		return
 	}
 	meta.Set(MetaRerror, goutil.BytesToString(b))
+}
+
+// Copy returns the copy of Rerror
+func (r Rerror) Copy() *Rerror {
+	return &r
+}
+
+// SetMessage sets the message field.
+func (r *Rerror) SetMessage(message string) *Rerror {
+	r.Message = message
+	return r
+}
+
+// SetDetail sets the detail field.
+func (r *Rerror) SetDetail(detail string) *Rerror {
+	r.Detail = detail
+	return r
+}
+
+// String prints error info.
+func (r *Rerror) String() string {
+	if r == nil {
+		return "<nil>"
+	}
+	b, _ := r.MarshalJSON()
+	return goutil.BytesToString(b)
 }
 
 // MarshalJSON marshals Rerror into JSON, implements json.Marshaler interface.
@@ -87,13 +96,11 @@ func (r *Rerror) MarshalJSON() ([]byte, error) {
 	var b = append(reA, strconv.FormatInt(int64(r.Code), 10)...)
 	if len(r.Message) > 0 {
 		b = append(b, reB...)
-		b = append(b, bytes.Replace(goutil.StringToBytes(r.Message), reD, reE, -1)...)
-		b = append(b, '"')
+		b = append(b, utils.ToJsonStr(goutil.StringToBytes(r.Message), false)...)
 	}
 	if len(r.Detail) > 0 {
 		b = append(b, reC...)
-		b = append(b, bytes.Replace(goutil.StringToBytes(r.Detail), reD, reE, -1)...)
-		b = append(b, '"')
+		b = append(b, utils.ToJsonStr(goutil.StringToBytes(r.Detail), false)...)
 	}
 	b = append(b, '}')
 	return b, nil
@@ -136,8 +143,7 @@ func ToRerror(err error) *Rerror {
 	if ok {
 		return r.toRerror()
 	}
-	rerr := rerrUnknownError.Copy()
-	rerr.Detail = err.Error()
+	rerr := rerrUnknownError.Copy().SetDetail(err.Error())
 	return rerr
 }
 

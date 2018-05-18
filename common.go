@@ -1,4 +1,4 @@
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,6 +54,10 @@ func TypeText(typ byte) string {
 
 // Internal Framework Rerror code.
 // Note: Recommended custom code is greater than 1000.
+//  unknown error code: -1.
+//  sender peer error code range: [100,199].
+//  packet handling error code range: [400,499].
+//  receiver peer error code range: [500,599].
 const (
 	CodeUnknownError        = -1
 	CodeConnClosed          = 102
@@ -273,6 +277,12 @@ TRYGO:
 		time.Sleep(time.Second)
 		goto TRYGO
 	}
+}
+
+// TryGo tries to execute the function via goroutine.
+// If there are no concurrent resources, execute it synchronously.
+func TryGo(fn func()) {
+	_gopool.TryGo(fn)
 }
 
 var printPidOnce sync.Once

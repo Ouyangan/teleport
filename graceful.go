@@ -1,4 +1,4 @@
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,12 +47,15 @@ func deletePeer(p *peer) {
 func shutdown() error {
 	peers.rwmu.RLock()
 	var (
-		list  = peers.list
+		list  []*peer
 		count int
 		errCh = make(chan error, len(list))
 	)
+	for p := range peers.list {
+		list = append(list, p)
+	}
 	peers.rwmu.RUnlock()
-	for p := range list {
+	for _, p := range list {
 		count++
 		go func(peer *peer) {
 			errCh <- peer.Close()

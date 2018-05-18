@@ -1,6 +1,6 @@
 // Package codec is the body's codec set.
 //
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,11 +34,11 @@ type Codec interface {
 }
 
 var codecMap = struct {
-	nameMap map[string]Codec
 	idMap   map[byte]Codec
+	nameMap map[string]Codec
 }{
-	nameMap: make(map[string]Codec),
 	idMap:   make(map[byte]Codec),
+	nameMap: make(map[string]Codec),
 }
 
 const (
@@ -48,35 +48,73 @@ const (
 	NilCodecName string = ""
 )
 
-// Reg registers Codec
+// Reg registers Codec.
 func Reg(codec Codec) {
 	if codec.Id() == NilCodecId {
 		panic(fmt.Sprintf("codec id can not be %d", NilCodecId))
 	}
-	if _, ok := codecMap.nameMap[codec.Name()]; ok {
-		panic("multi-register codec name: " + codec.Name())
-	}
 	if _, ok := codecMap.idMap[codec.Id()]; ok {
 		panic(fmt.Sprintf("multi-register codec id: %d", codec.Id()))
 	}
-	codecMap.nameMap[codec.Name()] = codec
+	if _, ok := codecMap.nameMap[codec.Name()]; ok {
+		panic("multi-register codec name: " + codec.Name())
+	}
 	codecMap.idMap[codec.Id()] = codec
+	codecMap.nameMap[codec.Name()] = codec
 }
 
-// Get returns Codec
-func Get(id byte) (Codec, error) {
-	codec, ok := codecMap.idMap[id]
+// Get returns Codec by id.
+func Get(codecId byte) (Codec, error) {
+	codec, ok := codecMap.idMap[codecId]
 	if !ok {
-		return nil, fmt.Errorf("unsupported codec id: %d", id)
+		return nil, fmt.Errorf("unsupported codec id: %d", codecId)
 	}
 	return codec, nil
 }
 
-// GetByName returns Codec
-func GetByName(name string) (Codec, error) {
-	codec, ok := codecMap.nameMap[name]
+// GetByName returns Codec by name.
+func GetByName(codecName string) (Codec, error) {
+	codec, ok := codecMap.nameMap[codecName]
 	if !ok {
-		return nil, fmt.Errorf("unsupported codec name: %s", name)
+		return nil, fmt.Errorf("unsupported codec name: %s", codecName)
 	}
 	return codec, nil
+}
+
+// Marshal returns the encoding of v.
+func Marshal(codecId byte, v interface{}) ([]byte, error) {
+	codec, err := Get(codecId)
+	if err != nil {
+		return nil, err
+	}
+	return codec.Marshal(v)
+}
+
+// Unmarshal parses the encoded data and stores the result
+// in the value pointed to by v.
+func Unmarshal(codecId byte, data []byte, v interface{}) error {
+	codec, err := Get(codecId)
+	if err != nil {
+		return err
+	}
+	return codec.Unmarshal(data, v)
+}
+
+// MarshalByName returns the encoding of v.
+func MarshalByName(codecName string, v interface{}) ([]byte, error) {
+	codec, err := GetByName(codecName)
+	if err != nil {
+		return nil, err
+	}
+	return codec.Marshal(v)
+}
+
+// UnmarshalByName parses the encoded data and stores the result
+// in the value pointed to by v.
+func UnmarshalByName(codecName string, data []byte, v interface{}) error {
+	codec, err := GetByName(codecName)
+	if err != nil {
+		return err
+	}
+	return codec.Unmarshal(data, v)
 }

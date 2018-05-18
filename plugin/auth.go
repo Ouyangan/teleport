@@ -38,6 +38,8 @@ func VerifyAuth(fn VerifyAuthInfoFunc) tp.Plugin {
 type (
 	// AuthSession auth session provides SetId, RemoteAddr and Swap methods in base session
 	AuthSession interface {
+		// Peer returns the peer.
+		Peer() tp.Peer
 		// SetId sets the session id.
 		SetId(newId string)
 		// RemoteAddr returns the remote network address.
@@ -70,7 +72,7 @@ func (a *auth) PostDial(sess tp.PreSession) *tp.Rerror {
 	if a.generateAuthInfoFunc == nil {
 		return nil
 	}
-	rerr := sess.Send(authURI, a.generateAuthInfoFunc(), nil, socket.WithBodyCodec('s'))
+	rerr := sess.Send(authURI, a.generateAuthInfoFunc(), nil, tp.WithBodyCodec('s'), tp.WithPtype(tp.TypePull))
 	if rerr != nil {
 		return rerr
 	}
@@ -85,7 +87,7 @@ func (a *auth) PostAccept(sess tp.PreSession) *tp.Rerror {
 		return nil
 	}
 	input, rerr := sess.Receive(func(header socket.Header) interface{} {
-		if header.Uri() == authURI {
+		if header.Ptype() == tp.TypePull && header.Uri() == authURI {
 			return new(string)
 		}
 		return nil
@@ -93,18 +95,15 @@ func (a *auth) PostAccept(sess tp.PreSession) *tp.Rerror {
 	if rerr != nil {
 		return rerr
 	}
-	if input.Uri() != authURI {
-		return tp.NewRerror(
+	authInfoPtr, ok := input.Body().(*string)
+	if !ok || input.Ptype() != tp.TypePull || input.Uri() != authURI {
+		rerr = tp.NewRerror(
 			tp.CodeUnauthorized,
 			tp.CodeText(tp.CodeUnauthorized),
 			fmt.Sprintf("the 1th package want: PULL %s, but have: %s %s", authURI, tp.TypeText(input.Ptype()), input.Uri()),
 		)
+	} else {
+		rerr = a.verifyAuthInfoFunc(*authInfoPtr, sess)
 	}
-	authInfo := *input.Body().(*string)
-	rerr = a.verifyAuthInfoFunc(authInfo, sess)
-	rerr2 := sess.Send(authURI, nil, rerr)
-	if rerr == nil {
-		rerr = rerr2
-	}
-	return rerr
+	return sess.Send(authURI, nil, rerr, tp.WithSeq(input.Seq()), tp.WithPtype(tp.TypeReply))
 }

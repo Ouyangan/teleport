@@ -1,4 +1,4 @@
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 )
 
-// json codec id
+// json codec name and id
 const (
 	NAME_JSON = "json"
 	ID_JSON   = 'j'
@@ -31,12 +31,12 @@ func init() {
 // JsonCodec json codec
 type JsonCodec struct{}
 
-// Name returns codec string
+// Name returns codec name.
 func (JsonCodec) Name() string {
 	return NAME_JSON
 }
 
-// Id returns codec id
+// Id returns codec id.
 func (JsonCodec) Id() byte {
 	return ID_JSON
 }

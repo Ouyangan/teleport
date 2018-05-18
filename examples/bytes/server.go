@@ -11,13 +11,13 @@ func main() {
 	tp.SetShutdown(time.Second*20, nil, nil)
 	var peer = tp.NewPeer(tp.PeerConfig{
 		SlowCometDuration: time.Millisecond * 500,
-		PrintBody:         true,
+		PrintDetail:       true,
 		ListenAddress:     "0.0.0.0:9090",
 	})
 	group := peer.SubRoute("group")
 	group.RoutePull(new(Home))
 	peer.SetUnknownPull(UnknownPullHandle)
-	peer.Listen()
+	peer.ListenAndServe()
 }
 
 // Home controller

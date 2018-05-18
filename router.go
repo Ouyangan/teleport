@@ -1,4 +1,4 @@
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,6 +113,17 @@ import (
  *
  *  // register the unknown push route: /*
  *  peer.SetUnknownPush(XxxUnknownPush)
+ *
+ * 7. The mapping rule of struct(func) name to URI path:
+ *
+ * - `AaBb` -> `/aa_bb`
+ * - `Aa_Bb` -> `/aa/bb`
+ * - `aa_bb` -> `/aa/bb`
+ * - `Aa__Bb` -> `/aa_bb`
+ * - `aa__bb` -> `/aa_bb`
+ * - `ABC_XYZ` -> `/abc/xyz`
+ * - `ABcXYz` -> `/abc_xyz`
+ * - `ABC__XYZ` -> `/abc_xyz`
  **/
 
 type (
@@ -122,10 +133,11 @@ type (
 	}
 	// SubRouter without the SetUnknownPull and SetUnknownPush methods
 	SubRouter struct {
-		root        *Router
-		handlers    map[string]*Handler
-		unknownPull **Handler
-		unknownPush **Handler
+		root         *Router
+		pullHandlers map[string]*Handler
+		pushHandlers map[string]*Handler
+		unknownPull  **Handler
+		unknownPush  **Handler
 		// only for register router
 		pathPrefix      string
 		pluginContainer *PluginContainer
@@ -146,10 +158,10 @@ type (
 )
 
 const (
-	pnPush        = "push"
-	pnPull        = "pull"
-	pnUnknownPush = "unknown_push"
-	pnUnknownPull = "unknown_pull"
+	pnPush        = "PUSH"
+	pnPull        = "PULL"
+	pnUnknownPush = "UNKNOWN_PUSH"
+	pnUnknownPull = "UNKNOWN_PULL"
 )
 
 // newRouter creates root router.
@@ -157,7 +169,8 @@ func newRouter(rootGroup string, pluginContainer *PluginContainer) *Router {
 	rootGroup = path.Join("/", rootGroup)
 	root := &Router{
 		subRouter: &SubRouter{
-			handlers:        make(map[string]*Handler),
+			pullHandlers:    make(map[string]*Handler),
+			pushHandlers:    make(map[string]*Handler),
 			unknownPull:     new(*Handler),
 			unknownPush:     new(*Handler),
 			pathPrefix:      rootGroup,
@@ -185,11 +198,12 @@ func (r *Router) SubRoute(pathPrefix string, plugin ...Plugin) *SubRouter {
 
 // SubRoute adds handler group.
 func (r *SubRouter) SubRoute(pathPrefix string, plugin ...Plugin) *SubRouter {
-	pluginContainer := r.pluginContainer.cloneAppendRight(plugin...)
+	pluginContainer := r.pluginContainer.cloneAndAppendMiddle(plugin...)
 	warnInvaildHandlerHooks(plugin)
 	return &SubRouter{
 		root:            r.root,
-		handlers:        r.handlers,
+		pullHandlers:    r.pullHandlers,
+		pushHandlers:    r.pushHandlers,
 		unknownPull:     r.unknownPull,
 		unknownPush:     r.unknownPush,
 		pathPrefix:      path.Join(r.pathPrefix, pathPrefix),
@@ -243,7 +257,7 @@ func (r *SubRouter) reg(
 	ctrlStruct interface{},
 	plugins []Plugin,
 ) []string {
-	pluginContainer := r.pluginContainer.cloneAppendRight(plugins...)
+	pluginContainer := r.pluginContainer.cloneAndAppendMiddle(plugins...)
 	warnInvaildHandlerHooks(plugins)
 	handlers, err := handlerMaker(
 		r.pathPrefix,
@@ -254,13 +268,19 @@ func (r *SubRouter) reg(
 		Fatalf("%v", err)
 	}
 	var names []string
+	var hadHandlers map[string]*Handler
+	if routerTypeName == pnPull {
+		hadHandlers = r.pullHandlers
+	} else {
+		hadHandlers = r.pushHandlers
+	}
 	for _, h := range handlers {
-		if _, ok := r.handlers[h.name]; ok {
+		if _, ok := hadHandlers[h.name]; ok {
 			Fatalf("there is a handler conflict: %s", h.name)
 		}
 		h.routerTypeName = routerTypeName
-		r.handlers[h.name] = h
-		pluginContainer.PostReg(h)
+		hadHandlers[h.name] = h
+		pluginContainer.postReg(h)
 		Printf("register %s handler: %s", routerTypeName, h.name)
 		names = append(names, h.name)
 	}
@@ -270,7 +290,7 @@ func (r *SubRouter) reg(
 // SetUnknownPull sets the default handler,
 // which is called when no handler for PULL is found.
 func (r *Router) SetUnknownPull(fn func(UnknownPullCtx) (interface{}, *Rerror), plugin ...Plugin) {
-	pluginContainer := r.subRouter.pluginContainer.cloneAppendRight(plugin...)
+	pluginContainer := r.subRouter.pluginContainer.cloneAndAppendMiddle(plugin...)
 	warnInvaildHandlerHooks(plugin)
 
 	var h = &Handler{
@@ -284,7 +304,7 @@ func (r *Router) SetUnknownPull(fn func(UnknownPullCtx) (interface{}, *Rerror), 
 				ctx.handleErr = rerr
 				rerr.SetToMeta(ctx.output.Meta())
 			} else {
-				ctx.setReplyBody(body)
+				ctx.output.SetBody(body)
 			}
 		},
 	}
@@ -300,7 +320,7 @@ func (r *Router) SetUnknownPull(fn func(UnknownPullCtx) (interface{}, *Rerror), 
 // SetUnknownPush sets the default handler,
 // which is called when no handler for PUSH is found.
 func (r *Router) SetUnknownPush(fn func(UnknownPushCtx) *Rerror, plugin ...Plugin) {
-	pluginContainer := r.subRouter.pluginContainer.cloneAppendRight(plugin...)
+	pluginContainer := r.subRouter.pluginContainer.cloneAndAppendMiddle(plugin...)
 	warnInvaildHandlerHooks(plugin)
 
 	var h = &Handler{
@@ -322,7 +342,7 @@ func (r *Router) SetUnknownPush(fn func(UnknownPushCtx) *Rerror, plugin ...Plugi
 }
 
 func (r *SubRouter) getPull(uriPath string) (*Handler, bool) {
-	t, ok := r.handlers[uriPath]
+	t, ok := r.pullHandlers[uriPath]
 	if ok {
 		return t, true
 	}
@@ -333,7 +353,7 @@ func (r *SubRouter) getPull(uriPath string) (*Handler, bool) {
 }
 
 func (r *SubRouter) getPush(uriPath string) (*Handler, bool) {
-	t, ok := r.handlers[uriPath]
+	t, ok := r.pushHandlers[uriPath]
 	if ok {
 		return t, true
 	}
@@ -440,13 +460,13 @@ func makePullHandlersFromStruct(pathPrefix string, pullCtrlStruct interface{}, p
 				ctx.handleErr = rerr
 				rerr.SetToMeta(ctx.output.Meta())
 			} else {
-				ctx.setReplyBody(rets[0].Interface())
+				ctx.output.SetBody(rets[0].Interface())
 			}
 			pool.Put(obj)
 		}
 
 		handlers = append(handlers, &Handler{
-			name:            path.Join(pathPrefix, ctrlStructSnakeName(ctype), goutil.SnakeString(mname)),
+			name:            path.Join(pathPrefix, ToUriPath(ctrlStructName(ctype)), ToUriPath(mname)),
 			handleFunc:      handleFunc,
 			argElem:         argType.Elem(),
 			reply:           replyType,
@@ -522,7 +542,7 @@ func makePullHandlersFromFunc(pathPrefix string, pullHandleFunc interface{}, plu
 				ctx.handleErr = rerr
 				rerr.SetToMeta(ctx.output.Meta())
 			} else {
-				ctx.setReplyBody(rets[0].Interface())
+				ctx.output.SetBody(rets[0].Interface())
 			}
 		}
 
@@ -563,7 +583,7 @@ func makePullHandlersFromFunc(pathPrefix string, pullHandleFunc interface{}, plu
 				ctx.handleErr = rerr
 				rerr.SetToMeta(ctx.output.Meta())
 			} else {
-				ctx.setReplyBody(rets[0].Interface())
+				ctx.output.SetBody(rets[0].Interface())
 			}
 			pool.Put(obj)
 		}
@@ -573,7 +593,7 @@ func makePullHandlersFromFunc(pathPrefix string, pullHandleFunc interface{}, plu
 		pluginContainer = newPluginContainer()
 	}
 	return []*Handler{&Handler{
-		name:            path.Join(pathPrefix, fnHandlerSnakeName(cValue)),
+		name:            path.Join(pathPrefix, ToUriPath(handlerFuncName(cValue))),
 		handleFunc:      handleFunc,
 		argElem:         argType.Elem(),
 		reply:           replyType,
@@ -672,7 +692,7 @@ func makePushHandlersFromStruct(pathPrefix string, pushCtrlStruct interface{}, p
 			pool.Put(obj)
 		}
 		handlers = append(handlers, &Handler{
-			name:            path.Join(pathPrefix, ctrlStructSnakeName(ctype), goutil.SnakeString(mname)),
+			name:            path.Join(pathPrefix, ToUriPath(ctrlStructName(ctype)), ToUriPath(mname)),
 			handleFunc:      handleFunc,
 			argElem:         argType.Elem(),
 			pluginContainer: pluginContainer,
@@ -780,7 +800,7 @@ func makePushHandlersFromFunc(pathPrefix string, pushHandleFunc interface{}, plu
 		pluginContainer = newPluginContainer()
 	}
 	return []*Handler{&Handler{
-		name:            path.Join(pathPrefix, fnHandlerSnakeName(cValue)),
+		name:            path.Join(pathPrefix, ToUriPath(handlerFuncName(cValue))),
 		handleFunc:      handleFunc,
 		argElem:         argType.Elem(),
 		pluginContainer: pluginContainer,
@@ -811,17 +831,15 @@ func isRerrorType(s string) bool {
 	return strings.HasPrefix(s, "*") && strings.HasSuffix(s, ".Rerror")
 }
 
-func ctrlStructSnakeName(ctype reflect.Type) string {
+func ctrlStructName(ctype reflect.Type) string {
 	split := strings.Split(ctype.String(), ".")
-	tName := split[len(split)-1]
-	return goutil.SnakeString(tName)
+	return split[len(split)-1]
 }
 
-func fnHandlerSnakeName(v reflect.Value) string {
+func handlerFuncName(v reflect.Value) string {
 	str := objectName(v)
 	split := strings.Split(str, ".")
-	tName := split[len(split)-1]
-	return goutil.SnakeString(tName)
+	return split[len(split)-1]
 }
 
 func objectName(v reflect.Value) string {
@@ -830,6 +848,18 @@ func objectName(v reflect.Value) string {
 		return runtime.FuncForPC(v.Pointer()).Name()
 	}
 	return t.String()
+}
+
+// ToUriPath maps struct(func) name to URI path.
+func ToUriPath(name string) string {
+	p := strings.Replace(name, "__", ".", -1)
+	a := strings.Split(p, "_")
+	for k, v := range a {
+		a[k] = goutil.SnakeString(v)
+	}
+	p = path.Join(a...)
+	p = path.Join("/", p)
+	return strings.Replace(p, ".", "_", -1)
 }
 
 // Name returns the handler name.

@@ -1,4 +1,4 @@
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ func (l *defaultLogger) newSet() {
 		Logger: log.New(color.NewColorableStdout(), "", 0),
 		Color:  true,
 	}
-	consoleFormat := logging.MustStringFormatter("[%{time:2006/01/02 15:04:05.000}] %{color:bold}[%{level:.4s}]%{color:reset} %{message} <%{longfile}>")
+	consoleFormat := logging.MustStringFormatter("[%{time:2006/01/02 15:04:05.000}] [%{color:bold}%{level:.4s}%{color:reset}] %{message} <%{longfile}>")
 	consoleBackendLevel := logging.AddModuleLevel(logging.NewBackendFormatter(consoleLogBackend, consoleFormat))
 	level, err := logging.LogLevel(l.level)
 	if err != nil {
@@ -112,6 +112,11 @@ func (l *defaultLogger) SetLevel(level string) {
 	l.newSet()
 }
 
+// GetLogger gets global logger.
+func GetLogger() Logger {
+	return globalLogger
+}
+
 // SetLogger sets global logger.
 // Note: Concurrent is not safe!
 func SetLogger(logger Logger) {
@@ -120,6 +125,11 @@ func SetLogger(logger Logger) {
 	}
 	globalLogger = logger
 	graceful.SetLog(logger)
+}
+
+// GetLoggerLevel gets the logger's level.
+func GetLoggerLevel() string {
+	return globalLogger.Level()
 }
 
 // SetLoggerLevel sets the logger's level.

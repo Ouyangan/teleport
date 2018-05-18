@@ -1,4 +1,4 @@
-// Copyright 2015-2017 HenryLee. All Rights Reserved.
+// Copyright 2015-2018 HenryLee. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +48,8 @@ type (
 		SetTlsConfigFromFile(tlsCertFile, tlsKeyFile string) error
 		// TlsConfig returns the TLS config.
 		TlsConfig() *tls.Config
+		// PluginContainer returns the global plugin container.
+		PluginContainer() *PluginContainer
 	}
 	// EarlyPeer the communication peer that has just been created
 	EarlyPeer interface {
@@ -72,14 +74,18 @@ type (
 	// Peer the communication peer which is server or client role
 	Peer interface {
 		EarlyPeer
-		// Listen turns on the listening service.
-		Listen(protoFunc ...socket.ProtoFunc) error
+		// ListenAndServe turns on the listening service.
+		ListenAndServe(protoFunc ...socket.ProtoFunc) error
 		// Dial connects with the peer of the destination address.
 		Dial(addr string, protoFunc ...socket.ProtoFunc) (Session, *Rerror)
 		// DialContext connects with the peer of the destination address, using the provided context.
 		DialContext(ctx context.Context, addr string, protoFunc ...socket.ProtoFunc) (Session, *Rerror)
 		// ServeConn serves the connection and returns a session.
+		// Note: Not support automatically redials after disconnection.
 		ServeConn(conn net.Conn, protoFunc ...socket.ProtoFunc) (Session, error)
+		// ServeListener serves the listener.
+		// Note: The caller ensures that the listener supports graceful shutdown.
+		ServeListener(lis net.Listener, protoFunc ...socket.ProtoFunc) error
 	}
 )
 
@@ -101,7 +107,7 @@ type peer struct {
 	tlsConfig         *tls.Config
 	slowCometDuration time.Duration
 	defaultBodyCodec  byte
-	printBody         bool
+	printDetail       bool
 	countTime         bool
 	timeNow           func() time.Time
 	timeSince         func(time.Time) time.Duration
@@ -115,15 +121,14 @@ type peer struct {
 
 	// only for server role
 	listenAddr string
-	listen     net.Listener
 }
 
 // NewPeer creates a new peer.
-func NewPeer(cfg PeerConfig, plugin ...Plugin) Peer {
+func NewPeer(cfg PeerConfig, globalLeftPlugin ...Plugin) Peer {
 	doPrintPid()
 	pluginContainer := newPluginContainer()
-	pluginContainer.AppendRight(plugin...)
-	pluginContainer.PreNewPeer(&cfg)
+	pluginContainer.AppendLeft(globalLeftPlugin...)
+	pluginContainer.preNewPeer(&cfg)
 	if err := cfg.check(); err != nil {
 		Fatalf("%v", err)
 	}
@@ -138,7 +143,7 @@ func NewPeer(cfg PeerConfig, plugin ...Plugin) Peer {
 		defaultDialTimeout: cfg.DefaultDialTimeout,
 		network:            cfg.Network,
 		listenAddr:         cfg.ListenAddress,
-		printBody:          cfg.PrintBody,
+		printDetail:        cfg.PrintDetail,
 		countTime:          cfg.CountTime,
 		redialTimes:        cfg.RedialTimes,
 	}
@@ -156,8 +161,13 @@ func NewPeer(cfg PeerConfig, plugin ...Plugin) Peer {
 		p.timeSince = func(time.Time) time.Duration { return 0 }
 	}
 	addPeer(p)
-	p.pluginContainer.PostNewPeer(p)
+	p.pluginContainer.postNewPeer(p)
 	return p
+}
+
+// PluginContainer returns the global plugin container.
+func (p *peer) PluginContainer() *PluginContainer {
+	return p.pluginContainer
 }
 
 // TlsConfig returns the TLS config.
@@ -214,8 +224,7 @@ func (p *peer) DialContext(ctx context.Context, addr string, protoFunc ...socket
 func (p *peer) newSessionForClient(dialFunc func() (net.Conn, error), addr string, protoFuncs []socket.ProtoFunc) (*session, *Rerror) {
 	var conn, dialErr = dialFunc()
 	if dialErr != nil {
-		rerr := rerrDialFailed.Copy()
-		rerr.Detail = dialErr.Error()
+		rerr := rerrDialFailed.Copy().SetDetail(dialErr.Error())
 		return nil, rerr
 	}
 	if p.tlsConfig != nil {
@@ -249,7 +258,7 @@ func (p *peer) newSessionForClient(dialFunc func() (net.Conn, error), addr strin
 	}
 
 	sess.socket.SetId(sess.LocalAddr().String())
-	if rerr := p.pluginContainer.PostDial(sess); rerr != nil {
+	if rerr := p.pluginContainer.postDial(sess); rerr != nil {
 		sess.Close()
 		return nil, rerr
 	}
@@ -276,7 +285,7 @@ func (p *peer) renewSessionForClient(sess *session, dialFunc func() (net.Conn, e
 	} else {
 		sess.socket.SetId(oldId)
 	}
-	if rerr := p.pluginContainer.PostDial(sess); rerr != nil {
+	if rerr := p.pluginContainer.postDial(sess); rerr != nil {
 		sess.Close()
 		return rerr.ToError()
 	}
@@ -287,26 +296,33 @@ func (p *peer) renewSessionForClient(sess *session, dialFunc func() (net.Conn, e
 	return nil
 }
 
+// ServeConn serves the connection and returns a session.
+// Note: Not support automatically redials after disconnection.
+func (p *peer) ServeConn(conn net.Conn, protoFunc ...socket.ProtoFunc) (Session, error) {
+	network := conn.LocalAddr().Network()
+	if strings.Contains(network, "udp") {
+		return nil, fmt.Errorf("invalid network: %s,\nrefer to the following: tcp, tcp4, tcp6, unix or unixpacket", network)
+	}
+	var sess = newSession(p, conn, protoFunc)
+	Tracef("serve ok (network:%s, addr:%s, id:%s)", network, sess.RemoteAddr().String(), sess.Id())
+	p.sessHub.Set(sess)
+	AnywayGo(sess.startReadAndHandle)
+	return sess, nil
+}
+
 // ErrListenClosed listener is closed error.
 var ErrListenClosed = errors.New("listener is closed")
 
-// Listen turns on the listening service.
-func (p *peer) Listen(protoFunc ...socket.ProtoFunc) error {
-	if len(p.listenAddr) == 0 {
-		Fatalf("listenAddress can not be empty")
-	}
-	lis, err := NewInheritListener(p.network, p.listenAddr, p.tlsConfig)
-	if err != nil {
-		Fatalf("%v", err)
-	}
+// ServeListener serves the listener.
+// Note: The caller ensures that the listener supports graceful shutdown.
+func (p *peer) ServeListener(lis net.Listener, protoFunc ...socket.ProtoFunc) error {
 	defer lis.Close()
-	p.listen = lis
 
 	network := lis.Addr().Network()
 	addr := lis.Addr().String()
-	Printf("listen ok (network:%s, addr:%s)", network, addr)
+	Printf("listen and serve (network:%s, addr:%s)", network, addr)
 
-	p.pluginContainer.PostListen(lis.Addr())
+	p.pluginContainer.postListen(lis.Addr())
 
 	var (
 		tempDelay time.Duration // how long to sleep on accept failure
@@ -352,39 +368,34 @@ func (p *peer) Listen(protoFunc ...socket.ProtoFunc) error {
 				}
 			}
 			var sess = newSession(p, conn, protoFunc)
-			if rerr := p.pluginContainer.PostAccept(sess); rerr != nil {
+			if rerr := p.pluginContainer.postAccept(sess); rerr != nil {
 				sess.Close()
 				return
 			}
-			Tracef("accept session(network:%s, addr:%s, id:%s)", network, sess.RemoteAddr().String(), sess.Id())
+			Tracef("accept ok (network:%s, addr:%s, id:%s)", network, sess.RemoteAddr().String(), sess.Id())
 			p.sessHub.Set(sess)
 			sess.startReadAndHandle()
 		})
 	}
 }
 
-// ServeConn serves the connection and returns a session.
-func (p *peer) ServeConn(conn net.Conn, protoFunc ...socket.ProtoFunc) (Session, error) {
-	network := conn.LocalAddr().Network()
-	if strings.Contains(network, "udp") {
-		return nil, fmt.Errorf("invalid network: %s,\nrefer to the following: tcp, tcp4, tcp6, unix or unixpacket", network)
+// ListenAndServe turns on the listening service.
+func (p *peer) ListenAndServe(protoFunc ...socket.ProtoFunc) error {
+	if len(p.listenAddr) == 0 {
+		Fatalf("listenAddress can not be empty")
 	}
-	var sess = newSession(p, conn, protoFunc)
-	if rerr := p.pluginContainer.PostAccept(sess); rerr != nil {
-		sess.Close()
-		return nil, rerr.ToError()
+	lis, err := NewInheritListener(p.network, p.listenAddr, p.tlsConfig)
+	if err != nil {
+		Fatalf("%v", err)
 	}
-	Tracef("accept session(network:%s, addr:%s, id:%s)", network, sess.RemoteAddr().String(), sess.Id())
-	p.sessHub.Set(sess)
-	AnywayGo(sess.startReadAndHandle)
-	return sess, nil
+	return p.ServeListener(lis, protoFunc...)
 }
 
 // Close closes peer.
 func (p *peer) Close() (err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			err = errors.Errorf("panic:\n%v\n%s", p, goutil.PanicTrace(2))
+			err = errors.Errorf("panic:%v\n%s", p, goutil.PanicTrace(2))
 		}
 	}()
 	close(p.closeCh)
