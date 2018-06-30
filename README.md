@@ -112,8 +112,8 @@ import (
 
 func main() {
     srv := tp.NewPeer(tp.PeerConfig{
-        CountTime:     true,
-        ListenAddress: ":9090",
+        CountTime:  true,
+        ListenPort: 9090,
     })
     srv.RoutePull(new(math))
     srv.ListenAndServe()
@@ -380,7 +380,7 @@ Default protocol `FastProto`(Big Endian):
 ```go
 // Start a server
 var peer1 = tp.NewPeer(tp.PeerConfig{
-    ListenAddress: "0.0.0.0:9090", // for server role
+    ListenPort: 9090, // for server role
 })
 peer1.Listen()
 
@@ -562,7 +562,8 @@ peer.SetUnknownPush(XxxUnknownPush)
 ```go
 type PeerConfig struct {
     Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix or unixpacket"`
-    ListenAddress      string        `yaml:"listen_address"       ini:"listen_address"       comment:"Listen address; for server role"`
+    LocalIP            string        `yaml:"local_ip"             ini:"local_ip"             comment:"Local IP"`
+    ListenPort         uint16        `yaml:"listen_port"          ini:"listen_port"          comment:"Listen port; for server role"`
     DefaultDialTimeout time.Duration `yaml:"default_dial_timeout" ini:"default_dial_timeout" comment:"Default maximum duration for dialing; for client role; ns,µs,ms,s,m,h"`
     RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; for client role"`
     DefaultBodyCodec   string        `yaml:"default_body_codec"   ini:"default_body_codec"   comment:"Default body codec type id"`
@@ -671,8 +672,7 @@ type PeerConfig struct {
 
 | project                                  | description                              |
 | ---------------------------------------- | ---------------------------------------- |
-| [TP-Micro](https://github.com/henrylee2cn/tp-micro) | TP-Micro is a simple, powerful micro service framework based on Teleport |
-| [Ants](https://github.com/xiaoenai/ants) | Ants is a highly available micro service platform based on TP-Micro and Teleport|
+| [TP-Micro](https://github.com/xiaoenai/tp-micro) | TP-Micro is a simple, powerful micro service framework based on Teleport |
 | [Pholcus](https://github.com/henrylee2cn/pholcus) | Pholcus is a distributed, high concurrency and powerful web crawler software |
 
 ## Business Users

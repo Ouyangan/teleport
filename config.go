@@ -17,6 +17,8 @@ package tp
 import (
 	"errors"
 	"math"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/henrylee2cn/cfgo"
@@ -29,7 +31,8 @@ import (
 //  ini tag is used for github.com/henrylee2cn/ini
 type PeerConfig struct {
 	Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix or unixpacket"`
-	ListenAddress      string        `yaml:"listen_address"       ini:"listen_address"       comment:"Listen address; for server role"`
+	LocalIP            string        `yaml:"local_ip"             ini:"local_ip"             comment:"Local IP"`
+	ListenPort         uint16        `yaml:"listen_port"          ini:"listen_port"          comment:"Listen port; for server role"`
 	DefaultDialTimeout time.Duration `yaml:"default_dial_timeout" ini:"default_dial_timeout" comment:"Default maximum duration for dialing; for client role; ns,µs,ms,s,m,h"`
 	RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; for client role"`
 	DefaultBodyCodec   string        `yaml:"default_body_codec"   ini:"default_body_codec"   comment:"Default body codec type id"`
@@ -39,7 +42,10 @@ type PeerConfig struct {
 	PrintDetail        bool          `yaml:"print_detail"         ini:"print_detail"         comment:"Is print body and metadata or not"`
 	CountTime          bool          `yaml:"count_time"           ini:"count_time"           comment:"Is count cost time or not"`
 
+	localAddr         net.Addr
+	listenAddrStr     string
 	slowCometDuration time.Duration
+	checked           bool
 }
 
 var _ cfgo.Config = new(PeerConfig)
@@ -50,17 +56,34 @@ func (p *PeerConfig) Reload(bind cfgo.BindFunc) error {
 	if err != nil {
 		return err
 	}
+	p.checked = false
 	return p.check()
 }
 
 func (p *PeerConfig) check() error {
+	if p.checked {
+		return nil
+	}
+	p.checked = true
+	if len(p.LocalIP) == 0 {
+		p.LocalIP = "0.0.0.0"
+	}
+	var err error
 	switch p.Network {
 	default:
 		return errors.New("Invalid network config, refer to the following: tcp, tcp4, tcp6, unix or unixpacket.")
 	case "":
 		p.Network = "tcp"
-	case "tcp", "tcp4", "tcp6", "unix", "unixpacket":
+		fallthrough
+	case "tcp", "tcp4", "tcp6":
+		p.localAddr, err = net.ResolveTCPAddr(p.Network, net.JoinHostPort(p.LocalIP, "0"))
+	case "unix", "unixpacket":
+		p.localAddr, err = net.ResolveUnixAddr(p.Network, net.JoinHostPort(p.LocalIP, "0"))
 	}
+	if err != nil {
+		return err
+	}
+	p.listenAddrStr = net.JoinHostPort(p.LocalIP, strconv.FormatUint(uint64(p.ListenPort), 10))
 	p.slowCometDuration = math.MaxInt64
 	if p.SlowCometDuration > 0 {
 		p.slowCometDuration = p.SlowCometDuration

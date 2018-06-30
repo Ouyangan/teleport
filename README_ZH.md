@@ -111,8 +111,8 @@ import (
 
 func main() {
     srv := tp.NewPeer(tp.PeerConfig{
-        CountTime:     true,
-        ListenAddress: ":9090",
+        CountTime:  true,
+        ListenPort: 9090,
     })
     srv.RoutePull(new(math))
     srv.ListenAndServe()
@@ -381,7 +381,7 @@ type Peer interface {
 ```go
 // Start a server
 var peer1 = tp.NewPeer(tp.PeerConfig{
-    ListenAddress: "0.0.0.0:9090", // for server role
+    ListenPort: 9090, // for server role
 })
 peer1.Listen()
 
@@ -564,7 +564,8 @@ peer.SetUnknownPush(XxxUnknownPush)
 ```go
 type PeerConfig struct {
     Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix or unixpacket"`
-    ListenAddress      string        `yaml:"listen_address"       ini:"listen_address"       comment:"Listen address; for server role"`
+    LocalIP            string        `yaml:"local_ip"             ini:"local_ip"             comment:"Local IP"`
+    ListenPort         uint16        `yaml:"listen_port"          ini:"listen_port"          comment:"Listen port; for server role"`
     DefaultDialTimeout time.Duration `yaml:"default_dial_timeout" ini:"default_dial_timeout" comment:"Default maximum duration for dialing; for client role; ns,µs,ms,s,m,h"`
     RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; for client role"`
     DefaultBodyCodec   string        `yaml:"default_body_codec"   ini:"default_body_codec"   comment:"Default body codec type id"`
@@ -668,8 +669,7 @@ type PeerConfig struct {
 
 | project                                  | description                              |
 | ---------------------------------------- | ---------------------------------------- |
-| [TP-Micro](https://github.com/henrylee2cn/tp-micro) | TP-Micro 是一个基于 Teleport 定制的、简约而强大的微服务框架          |
-| [Ants](https://github.com/xiaoenai/ants) | Ants 是一套基于 TP-Micro 和 Teleport 的、高可用的微服务平台解决方案 |
+| [TP-Micro](https://github.com/xiaoenai/tp-micro) | TP-Micro 是一个基于 Teleport 定制的、简约而强大的微服务框架          |
 | [Pholcus](https://github.com/henrylee2cn/pholcus) | Pholcus（幽灵蛛）是一款纯Go语言编写的支持分布式的高并发、重量级爬虫软件，定位于互联网数据采集，为具备一定Go或JS编程基础的人提供一个只需关注规则定制的功能强大的爬虫工具 |
 
 ## 企业用户
